@@ -1,0 +1,312 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "storage_account_name": {
+      "defaultValue": "iotanalysisstorage",
+      "type": "String"
+    },
+    "streamingjobs_name": {
+      "defaultValue": "az-iot-analysis-job",
+      "type": "String"
+    },
+    "database_account_name": {
+      "defaultValue": "az-iot-analysis-cosmosdb",
+      "type": "String"
+    },
+    "database_name": {
+      "defaultValue": "az-iot-analysis-cosmosdb-sqldatabase",
+      "type": "String"
+    }
+  },
+  "variables": {},
+  "resources": [
+    {
+      "type": "Microsoft.Storage/storageAccounts",
+      "apiVersion": "2019-06-01",
+      "name": "[parameters('storage_account_name')]",
+      "location": "japaneast",
+      "sku": {
+        "name": "Standard_RAGRS",
+        "tier": "Standard"
+      },
+      "kind": "StorageV2",
+      "properties": {
+        "minimumTlsVersion": "TLS1_2",
+        "allowBlobPublicAccess": true,
+        "networkAcls": {
+          "bypass": "AzureServices",
+          "virtualNetworkRules": [],
+          "ipRules": [],
+          "defaultAction": "Allow"
+        },
+        "supportsHttpsTrafficOnly": true,
+        "encryption": {
+          "services": {
+            "file": {
+              "keyType": "Account",
+              "enabled": true
+            },
+            "blob": {
+              "keyType": "Account",
+              "enabled": true
+            }
+          },
+          "keySource": "Microsoft.Storage"
+        },
+        "accessTier": "Hot"
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices",
+      "apiVersion": "2019-06-01",
+      "name": "[concat(parameters('storage_account_name'), '/default')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storage_account_name'))]"
+      ],
+      "sku": {
+        "name": "Standard_RAGRS",
+        "tier": "Standard"
+      },
+      "properties": {
+        "cors": {
+          "corsRules": []
+        },
+        "deleteRetentionPolicy": {
+          "enabled": false
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2019-06-01",
+      "name": "[concat(parameters('storage_account_name'), '/default/error')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storage_account_name'), 'default')]",
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storage_account_name'))]"
+      ],
+      "properties": {
+        "defaultEncryptionScope": "$account-encryption-key",
+        "denyEncryptionScopeOverride": false,
+        "publicAccess": "None"
+      }
+    },
+    {
+      "type": "Microsoft.Storage/storageAccounts/blobServices/containers",
+      "apiVersion": "2019-06-01",
+      "name": "[concat(parameters('storage_account_name'), '/default/input')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.Storage/storageAccounts/blobServices', parameters('storage_account_name'), 'default')]",
+        "[resourceId('Microsoft.Storage/storageAccounts', parameters('storage_account_name'))]"
+      ],
+      "properties": {
+        "defaultEncryptionScope": "$account-encryption-key",
+        "denyEncryptionScopeOverride": false,
+        "publicAccess": "None"
+      }
+    },
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts",
+      "apiVersion": "2020-04-01",
+      "name": "[parameters('database_account_name')]",
+      "location": "[resourceGroup().location]",
+      "tags": {
+        "defaultExperience": "Core (SQL)",
+        "hidden-cosmos-mmspecial": "",
+        "CosmosAccountType": "非運用"
+      },
+      "kind": "GlobalDocumentDB",
+      "properties": {
+        "enableFreeTier": true,
+        "createMode": "Default",
+        "databaseAccountOfferType": "Standard",
+        "consistencyPolicy": {
+          "defaultConsistencyLevel": "Session",
+          "maxIntervalInSeconds": 5,
+          "maxStalenessPrefix": 100
+        },
+        "locations": [
+          {
+            "locationName": "[resourceGroup().location]"
+          }
+        ],
+        "backupPolicy": {
+          "type": "Periodic",
+          "periodicModeProperties": {
+            "backupIntervalInMinutes": 240,
+            "backupRetentionIntervalInHours": 8
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases",
+      "apiVersion": "2020-04-01",
+      "name": "[concat(parameters('database_account_name'), '/', parameters('database_name'))]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('database_account_name'))]"
+      ],
+      "properties": {
+        "resource": {
+          "id": "[parameters('database_name')]"
+        },
+        "options": {
+          "throughput": 400
+        }
+      }
+    },
+    {
+      "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+      "apiVersion": "2020-04-01",
+      "name": "[concat(parameters('database_account_name'), '/',parameters('database_name'),'/temperatures')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('database_account_name'), parameters('database_name'))]",
+        "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('database_account_name'))]"
+      ],
+      "properties": {
+        "resource": {
+          "id": "temperatures",
+          "indexingPolicy": {
+            "indexingMode": "consistent",
+            "automatic": true,
+            "includedPaths": [
+              {
+                "path": "/*"
+              }
+            ],
+            "excludedPaths": [
+              {
+                "path": "/\"_etag\"/?"
+              }
+            ]
+          },
+          "partitionKey": {
+            "paths": ["/id"],
+            "kind": "Hash"
+          },
+          "uniqueKeyPolicy": {
+            "uniqueKeys": []
+          },
+          "conflictResolutionPolicy": {
+            "mode": "LastWriterWins",
+            "conflictResolutionPath": "/_ts"
+          }
+        },
+        "options": {}
+      }
+    },
+    {
+      "type": "Microsoft.StreamAnalytics/streamingjobs",
+      "apiVersion": "2017-04-01-preview",
+      "name": "[parameters('streamingjobs_name')]",
+      "location": "Japan East",
+      "properties": {
+        "sku": {
+          "name": "Standard"
+        },
+        "jobType": "Cloud",
+        "compatibilityLevel": "1.2"
+      }
+    },
+    {
+      "type": "Microsoft.StreamAnalytics/streamingjobs/inputs",
+      "apiVersion": "2017-04-01-preview",
+      "name": "[concat(parameters('streamingjobs_name'), '/input-blob')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.StreamAnalytics/streamingjobs', parameters('streamingjobs_name'))]"
+      ],
+      "properties": {
+        "type": "Stream",
+        "datasource": {
+          "type": "Microsoft.Storage/Blob",
+          "properties": {
+            "sourcePartitionCount": 1,
+            "storageAccounts": [
+              {
+                "accountName": "iotanalysisstorage",
+                "accountKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storage_account_name')), '2019-06-01').keys[0].value]"    
+              }
+            ],
+            "container": "input",
+            "pathPattern": "{date}/{time}",
+            "dateFormat": "yyyy/MM/dd",
+            "timeFormat": "HH"
+          }
+        },
+        "compression": {
+          "type": "None"
+        },
+        "serialization": {
+          "type": "Json",
+          "properties": {
+            "encoding": "UTF8"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.StreamAnalytics/streamingjobs/outputs",
+      "apiVersion": "2017-04-01-preview",
+      "name": "[concat(parameters('streamingjobs_name'), '/output-blob-error')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.StreamAnalytics/streamingjobs', parameters('streamingjobs_name'))]"
+      ],
+      "properties": {
+        "datasource": {
+          "type": "Microsoft.Storage/Blob",
+          "properties": {
+            "storageAccounts": [
+              {
+                "accountName": "iotanalysisstorage",
+                "accountKey": "[listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storage_account_name')), '2019-06-01').keys[0].value]"    
+              }
+            ],
+            "container": "error",
+            "pathPattern": "{date}/{time}",
+            "dateFormat": "yyyy/MM/dd",
+            "timeFormat": "HH",
+            "authenticationMode": "ConnectionString"
+          }
+        },
+        "serialization": {
+          "type": "Json",
+          "properties": {
+            "encoding": "UTF8",
+            "format": "LineSeparated"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.StreamAnalytics/streamingjobs/outputs",
+      "apiVersion": "2017-04-01-preview",
+      "name": "[concat(parameters('streamingjobs_name'), '/output-cosmosdb')]",
+      "dependsOn": [
+        "[resourceId('Microsoft.StreamAnalytics/streamingjobs', parameters('streamingjobs_name'))]"
+      ],
+      "properties": {
+        "datasource": {
+          "type": "Microsoft.Storage/DocumentDB",
+          "properties": {
+            "collectionNamePattern": "temperatures",
+            "documentId": "id",
+            "accountId": "[parameters('database_account_name')]",
+            "database": "[parameters('database_name')]",
+            "accountKey": "[listKeys(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('database_account_name')), '2020-04-01').primaryMasterKey]"
+          }
+        }
+      }
+    },
+    {
+      "type": "Microsoft.StreamAnalytics/streamingjobs/transformations",
+      "name": "[concat(parameters('streamingjobs_name'), '/query')]",
+      "apiVersion": "2017-04-01-preview",
+      "dependsOn": [
+        "[resourceId('Microsoft.StreamAnalytics/streamingjobs', parameters('streamingjobs_name'))]"
+      ],
+      "properties": {
+        "query": "SELECT * INTO [output-blob-error] FROM [input-blob] WHERE error = 1 SELECT * INTO [output-cosmosdb] FROM [input-blob] WHERE error = 0"
+      }
+    }
+  ]
+}
